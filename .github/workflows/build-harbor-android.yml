@@ -15,27 +15,43 @@ jobs:
   build-android:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK / NDK
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager             "platform-tools"             "platforms;android-36"             "build-tools;36.0.0"             "ndk;27.2.12479018"
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "sdkmanager not found at $SDKMANAGER"
+            find "$ANDROID_SDK_ROOT/cmdline-tools" -maxdepth 3 -type f -name sdkmanager -print || true
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" \
+            "platform-tools" \
+            "platforms;android-36" \
+            "build-tools;36.0.0" \
+            "ndk;27.2.12479018"
+
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+          "$SDKMANAGER" --list_installed
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -55,9 +71,9 @@ jobs:
           version: 9
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
 
       - name: Install JavaScript dependencies
@@ -66,16 +82,21 @@ jobs:
       - name: Build universal Android APK
         shell: bash
         run: |
-          pnpm tauri android build             --apk             --debug             --target aarch64             --target armv7             --config src-tauri/tauri.android.conf.json
+          pnpm tauri android build \
+            --apk \
+            --debug \
+            --target aarch64 \
+            --target armv7 \
+            --config src-tauri/tauri.android.conf.json
 
       - name: Find APK
-        id: apk
         shell: bash
         run: |
           echo "Generated APK files:"
           find src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" -print || true
 
-          APK="$(find src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" | grep -E 'universal|debug' | head -n 1 || true)"
+          APK="$(find src-tauri/gen/android/app/build/outputs/apk -type f -name "*universal*.apk" | head -n 1 || true)"
+
           if [ -z "$APK" ]; then
             APK="$(find src-tauri/gen/android/app/build/outputs/apk -type f -name "*.apk" | head -n 1 || true)"
           fi
@@ -87,7 +108,7 @@ jobs:
 
           mkdir -p out
           cp "$APK" "out/Harbor-Android-Phone-TV-universal.apk"
-          ls -lh out/Harbor-Android-Phone-TV-universal.apk
+          ls -lh "out/Harbor-Android-Phone-TV-universal.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
